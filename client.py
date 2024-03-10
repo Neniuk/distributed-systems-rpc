@@ -11,6 +11,7 @@ import datetime
 
 
 notes_tree = None
+wiki_tree = None
 
 
 def validate_search_notes(note):
@@ -41,13 +42,48 @@ def validate_search_notes(note):
         return False
 
 
+def validate_search_wiki(result):
+    try:
+        # Check if input is valid XML
+        root = ET.fromstring(result)
+
+        url = root.find("url")
+        if url is None:
+            print("Tag not found: url")
+            return False
+
+        text = root.find("text")
+        if text is None:
+            print("Tag not found: text")
+            return False
+
+        print("Input is valid.")
+        return True
+
+    except ET.ParseError:
+        print("Invalid XML.")
+        return False
+
+
 def send_note(topic_entry, title_entry, text_entry):
     print("Sending note...")
 
     # Get form data
-    topic = topic_entry.get()
-    title = title_entry.get()
-    text = text_entry.get()
+    if isinstance(title_entry, tk.Entry):
+        title = title_entry.get()
+    elif isinstance(title_entry, str):
+        title = title_entry
+
+    if isinstance(text_entry, tk.Entry):
+        text = text_entry.get()
+    elif isinstance(text_entry, str):
+        text = text_entry
+
+    if isinstance(topic_entry, tk.Entry):
+        topic = topic_entry.get()
+    elif isinstance(topic_entry, str):
+        topic = topic_entry
+
     timestamp = datetime.datetime.now().isoformat()
 
     # XML payload
@@ -67,10 +103,13 @@ def send_note(topic_entry, title_entry, text_entry):
         else:
             print("Failed to save data.")
 
-    # Clear form fields
-    topic_entry.delete(0, tk.END)
-    title_entry.delete(0, tk.END)
-    text_entry.delete(0, tk.END)
+    # Clear form fields if they are Entry widgets
+    if isinstance(topic_entry, tk.Entry):
+        topic_entry.delete(0, tk.END)
+    if isinstance(title_entry, tk.Entry):
+        title_entry.delete(0, tk.END)
+    if isinstance(text_entry, tk.Entry):
+        text_entry.delete(0, tk.END)
 
 
 def search_notes(topic_entry):
@@ -120,6 +159,60 @@ def search_notes(topic_entry):
 
     # Clear form fields
     topic_entry.delete(0, tk.END)
+
+
+def search_wiki(search_entry):
+    # Get form data
+    search = search_entry.get()
+
+    # XML payload
+    root = ET.Element("data")
+    ET.SubElement(root, "query").text = search
+
+    xml_data = ET.tostring(root, encoding="unicode")
+
+    # XML-RPC client
+    with xmlrpc.client.ServerProxy("http://localhost:5000") as proxy:
+        # Search Wikipedia on server
+        result = proxy.search_wikipedia(xml_data)
+        print("Wikipedia result:", result)
+        if validate_search_wiki(result):
+            # Parse XML
+            root = ET.fromstring(result)
+            url = root.find("url").text
+            text = root.find("text").text
+
+            wiki_obj = {
+                "url": url,
+                "text": text
+            }
+
+            # Add Wikipedia result to Treeview
+            global wiki_tree
+            if wiki_tree is not None:
+                wiki_tree.delete(*wiki_tree.get_children())
+                wiki_tree.insert("", "end", values=(
+                    wiki_obj["url"], wiki_obj["text"]))
+
+    # Clear form fields
+    search_entry.delete(0, tk.END)
+
+
+def add_to_topic_window(title, url, window):
+    # Create new window
+    new_window = tk.Toplevel(window)
+    new_window.title("Add To Topic")
+    new_window.geometry("200x100")
+
+    # Create form fields
+    topic_label = tk.Label(new_window, text="Topic: ")
+    topic_label.pack()
+    topic_entry = tk.Entry(new_window)
+    topic_entry.pack()
+
+    add_button = tk.Button(new_window, text="Add",
+                           command=lambda: send_note(topic_entry, title, url))
+    add_button.pack()
 
 
 def view_notes_frame(window):
@@ -187,14 +280,68 @@ def add_note_frame(window):
     return add_note_frm
 
 
-def view_notes_view(add_note_frame, view_notes_frame):
+def search_wiki_frame(window):
+    # Create frame
+    search_wiki_frm = tk.Frame(window)
+
+    # Title
+    title = tk.Label(search_wiki_frm, text="Search Wikipedia")
+    title.pack()
+
+    # Create form fields
+    search_label = tk.Label(search_wiki_frm, text="Search:")
+    search_label.pack()
+    search_entry = tk.Entry(search_wiki_frm)
+    search_entry.pack()
+
+    search_button = tk.Button(
+        search_wiki_frm, text="Search", command=lambda: search_wiki(search_entry))
+    search_button.pack()
+
+    # Found articles
+    articles_label = tk.Label(search_wiki_frm, text="Found Articles: ")
+    articles_label.pack()
+
+    # Create Treeview
+    global wiki_tree
+    wiki_tree = ttk.Treeview(search_wiki_frm, columns=(
+        "URL", "Description", "Add To Notes Topic"), show="headings")
+    wiki_tree.heading("URL", text="URL")
+    wiki_tree.heading("Description", text="Description")
+    wiki_tree.heading("Add To Notes Topic", text="Add To Notes Topic")
+    wiki_tree.column("URL", width=300)
+    wiki_tree.column("Description", width=200)
+    wiki_tree.column("Add To Notes Topic", width=100)
+    wiki_tree.pack()
+
+    # Create button
+    button = tk.Button(search_wiki_frm, text="Add To Notes Topic", command=lambda: add_to_topic_window(
+        wiki_tree.item(wiki_tree.selection())[
+            "values"][1] if wiki_tree.selection() else "",
+        wiki_tree.item(wiki_tree.selection())[
+            "values"][0] if wiki_tree.selection() else "",
+        window))
+    button.pack()
+
+    return search_wiki_frm
+
+
+def view_notes_view(add_note_frame, view_notes_frame, search_wiki_frame):
     add_note_frame.pack_forget()
+    search_wiki_frame.pack_forget()
     view_notes_frame.pack()
 
 
-def add_note_view(add_note_frame, view_notes_frame):
+def add_note_view(add_note_frame, view_notes_frame, search_wiki_frame):
     view_notes_frame.pack_forget()
+    search_wiki_frame.pack_forget()
     add_note_frame.pack()
+
+
+def search_wiki_view(search_wiki_frame, view_notes_frame, add_note_frame):
+    view_notes_frame.pack_forget()
+    add_note_frame.pack_forget()
+    search_wiki_frame.pack()
 
 
 def main():
@@ -206,17 +353,20 @@ def main():
     # Create frames
     view_notes_frm = view_notes_frame(window)
     add_note_frm = add_note_frame(window)
+    search_wiki_frm = search_wiki_frame(window)
 
     # Create navbar
     navbar = tk.Menu(window)
     navbar.add_command(label="Add Note", command=lambda: add_note_view(
-        add_note_frm, view_notes_frm))
+        add_note_frm, view_notes_frm, search_wiki_frm))
     navbar.add_command(label="View Notes",
-                       command=lambda: view_notes_view(add_note_frm, view_notes_frm))
+                       command=lambda: view_notes_view(add_note_frm, view_notes_frm, search_wiki_frm))
+    navbar.add_command(label="Search Wikipedia",
+                       command=lambda: search_wiki_view(search_wiki_frm, view_notes_frm, add_note_frm))
     window.config(menu=navbar)
 
     # Show add note view by default
-    add_note_view(add_note_frm, view_notes_frm)
+    add_note_view(add_note_frm, view_notes_frm, search_wiki_frm)
 
     # Start the Tkinter event loop
     window.mainloop()

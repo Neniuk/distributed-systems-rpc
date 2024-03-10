@@ -2,10 +2,12 @@
 # - https://docs.python.org/3/library/xmlrpc.server.html#module-xmlrpc.server
 # - https://docs.python.org/3/library/socketserver.html
 # - https://docs.python.org/3/library/xml.etree.elementtree.html
+# - https://www.mediawiki.org/wiki/API:Opensearch#GET_request
 
 from xmlrpc.server import SimpleXMLRPCServer, SimpleXMLRPCRequestHandler
 import xml.etree.ElementTree as ET
 from socketserver import ThreadingMixIn
+import requests
 
 
 class ThreadedXMLRPCServer(ThreadingMixIn, SimpleXMLRPCServer):
@@ -55,6 +57,24 @@ class NotebookRequestHandler:
             topic = root.find("topic")
             if topic is None:
                 print("Tag not found: topic")
+                return False
+
+            print("Input is valid.")
+            return True
+
+        except ET.ParseError:
+            print("Invalid XML.")
+            return False
+
+    def __validate_input_wikipedia__(self, input):
+        try:
+            # Check if input is valid XML
+            root = ET.fromstring(input)
+
+            # Check if input has the correct tags
+            query = root.find("query")
+            if query is None:
+                print("Tag not found: query")
                 return False
 
             print("Input is valid.")
@@ -140,6 +160,55 @@ class NotebookRequestHandler:
         else:
             print("Invalid input.")
             return []
+
+    def search_wikipedia(self, query):
+        print("Query received: ", query)
+        if self.__validate_input_wikipedia__(query):
+            query = ET.fromstring(query).find("query").text
+
+            session = requests.Session()
+
+            url = "https://en.wikipedia.org/w/api.php"
+
+            parameters = {
+                "action": "opensearch",
+                "namespace": "0",
+                "search": query,
+                "limit": "1",
+                "format": "xml",
+            }
+
+            response = session.get(url=url, params=parameters)
+            print("Response: ", response)
+            print("Response text: ", response.text)
+
+            # Namespace
+            ns = {"ns": "http://opensearch.org/searchsuggest2"}
+
+            # Parse XML response
+            response_xml = ET.fromstring(response.text)
+
+            article_url = response_xml.find("ns:Section/ns:Item/ns:Url", ns)
+            if article_url is None:
+                print("No data found.")
+                return ""
+
+            article_text = response_xml.find("ns:Section/ns:Item/ns:Text", ns)
+            if article_text is None:
+                print("No data found.")
+                return ""
+
+            data = ET.Element("data")
+            ET.SubElement(data, "url").text = article_url.text
+            ET.SubElement(data, "text").text = article_text.text
+
+            string_data = ET.tostring(data, encoding="unicode")
+            print("Data found: ", string_data)
+
+            return string_data
+        else:
+            print("Invalid input.")
+            return ""
 
 
 handler = NotebookRequestHandler()
