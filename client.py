@@ -95,6 +95,8 @@ def send_note(topic_entry, title_entry, text_entry):
 
     xml_data = ET.tostring(root, encoding="unicode")
 
+    print("Note to send:", xml_data)
+
     # XML-RPC client
     with xmlrpc.client.ServerProxy("http://localhost:5000") as proxy:
         # Send note to server
